@@ -1,9 +1,15 @@
 /*
  Copyright (C) 2011 James Coliz, Jr. <maniacbug@ymail.com>
+ Copyright (C) 2015 Martin Reus <https://github.com/martinreus>
+
+ This library provides a means to send/receive reliable messages between nodes in
+ a mesh network. It is built on top of the original library RF24Network by ManiacBug
+ and optimized by TMRh20.
 
  This program is free software; you can redistribute it and/or
  modify it under the terms of the GNU General Public License
  version 2 as published by the Free Software Foundation.
+
  */
 
 #ifndef __RF24NETWORK_H__
@@ -17,6 +23,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "RF24NetworkStatus.h"
 
 class RF24;
 
@@ -29,11 +36,26 @@ struct RF24NetworkHeader
 {
   uint16_t from_node; /**< Logical address where the message was generated */
   uint16_t to_node; /**< Logical address where the message is going */
-  uint16_t id; /**< Sequential message ID, incremented every message */
-  unsigned char type; /**< Type of the packet.  0-127 are user-defined types, 128-255 are reserved for system */
+  uint16_t id; /**< Sequential message ID. This id is controlled by a connection structure created for each connection to a node. TODO: remove auto-increment*/
+  /**
+   * Type of the packet.  0-127 are user-defined types, 128-255 are reserved for system
+   *
+   * Possible system message types:
+   * MSG_ACK
+   * MSG_SYN
+   * MSG_SYN_ACK
+   * MSG_BUFFER_FULL
+   * MSG_CONN_REFUSED
+   * MSG_DISCONNECT
+   * MSG_DISCONNECT_ACK
+   * MSG_NOT_CONNECTED
+   *
+   * Everything ranging from 0-127 is considered to be a user message, so it should be copied to the read buffers.
+   */
+  unsigned char type; 
   unsigned char reserved; /**< Reserved for future use */
 
-  static uint16_t next_id; /**< The message ID of the next message to be sent */
+  static uint16_t next_id; /**< The message ID of the next message to be sent TODO: remove*/
 
   /**
    * Default constructor
@@ -77,7 +99,6 @@ struct RF24NetworkHeader
  * This class implements an OSI Network Layer using nRF24L01(+) radios driven
  * by RF24 library.
  */
-
 class RF24Network
 {
 public:
@@ -138,7 +159,49 @@ public:
   size_t read(RF24NetworkHeader& header, void* message, size_t maxlen);
 
   /**
-   * Send a message
+   * Connects to a node, to establish a reliable communication pipe.
+   * In order to send a reliable message to another node in the network, this call is needed
+   * to establish a "pipe" of arbitrary data.
+   * This call is non-blocking.
+   * When a connection is established, the callback function
+   * passed as argument is called with an integer CONN_OK as parameter.
+   * When a connection is not possible (if node is not reachable, maximum number of connections
+   * were reached and so on) the callback is called with one of the following statuses:
+   *
+   * CONN_REFUSED
+   * CONN_TIMEOUT
+   */
+  void connect(uint16_t nodeAddress, void (* callback)(ConnectionStatus *));
+
+  /**
+   * Send a message reliably. This method puts a message into a buffer if there is
+   * space available, and sends it while in the update loop. This method tries to deliver
+   * the message reliably using a TCP-like implementation with ACK messages. Success
+   * or failure statuses are handed to the callback function pointer passed as argument.
+   * Please be aware that in order to send a message reliably, first one needs to
+   * establish a connection to a node using the connect() method.
+   * Call to this method is non-blocking.
+   * Trying to call this method while in the update loop of this library will render no action.
+   *
+   * @note Optimization: Extended timeouts/retries enabled. See txTimeout for more info.
+   * @param[in,out] header The header (envelope) of this message.  The critical
+   * thing to fill in is the @p to_node field so we know where to send the
+   * message.  It is then updated with the details of the actual header sent.
+   * @param message Pointer to memory where the message is located
+   * @param len The size of the message
+   * @param callback A callback function pointer to handle statuses for this call.
+   */
+  void sendReliable(uint16_t nodeAddress, const void* message, size_t len, void (*callback)(MessageStatus *));
+
+  /**
+   * Send a message unreliably. This was maintained for compatibility purposes. Please be aware
+   * that calling this method does not guarantee message delivery between nodes that require multiple hops.
+   * Also note that the message id (which is controlled by an internal connection structure for each node)
+   * must be respected in order not to be dropped on the receiver node, if the node is also running
+   * this version of the RF24Network library. For example: if a message was sent reliably to a node
+   * and this message was given an id 3, an unreliable message MUST be sent with id 4, or
+   * else it will be dropped on the receiving node.
+   * Trying to call this method while in the update loop of this library will render no action.
    *
    * @note Optimization: Extended timeouts/retries enabled. See txTimeout for more info.
    * @param[in,out] header The header (envelope) of this message.  The critical
@@ -148,9 +211,9 @@ public:
    * @param len The size of the message
    * @return Whether the message was successfully received
    */
-  bool write(RF24NetworkHeader& header,const void* message, size_t len);
+  bool write(RF24NetworkHeader& header, const void* message, size_t len);
 
-/**
+  /**
    * Sleep this node - Still Under Development
    * @note NEW - Nodes can now be slept while the radio is not actively transmitting. This must be manually enabled by uncommenting
    * the #define ENABLE_SLEEP_MODE in RF24Network_config.h

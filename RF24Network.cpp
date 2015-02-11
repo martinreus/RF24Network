@@ -210,6 +210,18 @@ size_t RF24Network::read(RF24NetworkHeader& header,void* message, size_t maxlen)
 
 /******************************************************************/
 
+void RF24Network::connect(uint16_t nodeAddress, void (* callback)(ConnectionStatus *)) {
+    //TODO implement
+}
+  
+/******************************************************************/
+
+void RF24Network::sendReliable(uint16_t nodeAddress, const void* message, size_t len, void (*callback)(MessageStatus *)) {
+    //TODO implement
+}
+
+/******************************************************************/
+
 bool RF24Network::write(RF24NetworkHeader& header,const void* message, size_t len)
 {
   // Fill out the header
