@@ -4,8 +4,8 @@
  * Created on February 15, 2015, 4:27 PM
  */
 
-#ifndef RF24NETWORKMSGDEF_H
-#define	RF24NETWORKMSGDEF_H
+#ifndef RF24NETWORKSTATUS_H
+#define	RF24NETWORKSTATUS_H
 
 // Reserved message types sent between nodes. Message types ranging from 0-127 are user defined messages.
 #define MSG_ACK 130
@@ -49,6 +49,6 @@ struct ConnectionStatus {
 
 };
 
-#endif	/* RF24NETWORKMSGDEF_H */
+#endif	/* RF24NETWORKSTATUS_H */
 
 

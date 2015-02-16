@@ -136,8 +136,8 @@ bool RF24Network::enqueue(void)
   // Copy the current frame into the frame queue
   if ( next_frame < frame_queue + sizeof(frame_queue) )
   {
-    memcpy(next_frame,frame_buffer, frame_size );
-    next_frame += frame_size;
+    memcpy(next_frame,frame_buffer, FRAME_SIZE );
+    next_frame += FRAME_SIZE;
 
     result = true;
     IF_SERIAL_DEBUG(printf_P(PSTR("ok\n\r")));
@@ -175,7 +175,7 @@ void RF24Network::peek(RF24NetworkHeader& header)
   if ( available() )
   {
     // Copy the next available frame from the queue into the provided buffer
-    memcpy(&header,next_frame-frame_size,sizeof(RF24NetworkHeader));
+    memcpy(&header,next_frame-FRAME_SIZE,sizeof(RF24NetworkHeader));
   }
 }
 
@@ -188,7 +188,7 @@ size_t RF24Network::read(RF24NetworkHeader& header,void* message, size_t maxlen)
   if ( available() )
   {
     // Move the pointer back one in the queue
-    next_frame -= frame_size;
+    next_frame -= FRAME_SIZE;
     uint8_t* frame = next_frame;
 
     memcpy(&header,frame,sizeof(RF24NetworkHeader));
@@ -196,7 +196,7 @@ size_t RF24Network::read(RF24NetworkHeader& header,void* message, size_t maxlen)
     if (maxlen > 0)
     {
       // How much buffer size should we actually copy?
-      bufsize = min(maxlen,frame_size-sizeof(RF24NetworkHeader));
+      bufsize = min(maxlen,FRAME_SIZE-sizeof(RF24NetworkHeader));
 
       // Copy the next available frame from the queue into the provided buffer
       memcpy(message,frame+sizeof(RF24NetworkHeader),bufsize);
@@ -230,7 +230,7 @@ bool RF24Network::write(RF24NetworkHeader& header,const void* message, size_t le
   // Build the full frame to send
   memcpy(frame_buffer,&header,sizeof(RF24NetworkHeader));
   if (len)
-    memcpy(frame_buffer + sizeof(RF24NetworkHeader),message,min(frame_size-sizeof(RF24NetworkHeader),len));
+    memcpy(frame_buffer + sizeof(RF24NetworkHeader),message,min(FRAME_SIZE-sizeof(RF24NetworkHeader),len));
 
   IF_SERIAL_DEBUG(printf_P(PSTR("%lu: NET Sending %s\n\r"),millis(),header.toString()));
   if (len)
@@ -320,11 +320,11 @@ bool RF24Network::write_to_pipe( uint16_t node, uint8_t pipe )
  // Open the correct pipe for writing.
   radio.openWritingPipe(out_pipe);
 
-  radio.writeFast(frame_buffer, frame_size);
+  radio.writeFast(frame_buffer, FRAME_SIZE);
   ok = radio.txStandBy(txTimeout);
 #else
   radio1.openWritingPipe(out_pipe);
-  radio1.writeFast(frame_buffer, frame_size);
+  radio1.writeFast(frame_buffer, FRAME_SIZE);
   ok = radio1.txStandBy(txTimeout);
 
 #endif

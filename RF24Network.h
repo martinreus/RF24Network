@@ -24,6 +24,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "RF24NetworkStatus.h"
+#include "RF24NetworkStructs.h"
 
 class RF24;
 
@@ -92,6 +93,7 @@ struct RF24NetworkHeader
    */
   const char* toString(void) const;
 };
+
 
 /**
  * 2014 - Optimized Network Layer for RF24 Radios
@@ -310,9 +312,8 @@ private:
   RF24& radio1;
 #endif
   uint16_t node_address; /**< Logical node address of this unit, 1 .. UINT_MAX */
-  const static int frame_size = 32; /**< How large is each frame over the air */
-  uint8_t frame_buffer[frame_size]; /**< Space to put the frame that will be sent/received over the air */
-  uint8_t frame_queue[5*frame_size]; /**< Space for a small set of frames that need to be delivered to the app layer */
+  uint8_t frame_buffer[FRAME_SIZE]; /**< Space to put the frame that will be sent/received over the air */
+  uint8_t frame_queue[5*FRAME_SIZE]; /**< Space for a small set of frames that need to be delivered to the app layer */
   uint8_t* next_frame; /**< Pointer into the @p frame_queue where we should place the next received frame */
 
   uint16_t parent_node; /**< Our parent's node address */
