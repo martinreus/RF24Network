@@ -23,7 +23,7 @@ bool is_valid_address( uint16_t node );
 
 /******************************************************************/
 #if !defined (DUAL_HEAD_RADIO)
-RF24Network::RF24Network( RF24& _radio ): radio(_radio), next_frame(frame_queue)
+RF24Network::RF24Network( RF24& _radio ): radio(_radio), next_frame(frame_queue), currentFreeMessageBufferPosition(0)
 {
 }
 #else
@@ -74,9 +74,16 @@ void RF24Network::begin(uint8_t _channel, uint16_t _node_address )
 
 /******************************************************************/
 
-void RF24Network::update(void)
-{
-  // if there is data ready
+void RF24Network::update(void) {
+    IF_SERIAL_DEBUG(printf_P(PSTR("%lu: update\n\r"),millis()));
+    readMessages();
+    sendConnectionAttempts();
+}
+
+/******************************************************************/
+
+void RF24Network::readMessages(void) {
+     // if there is data ready
   uint8_t pipe_num;
   while ( radio.isValid() && radio.available(&pipe_num) )
   {
@@ -98,14 +105,20 @@ void RF24Network::update(void)
 		continue;
 	  }
 
-      // Is this for us?
-      if ( header.to_node == node_address ){
-	// Add it to the buffer of frames for us
-		enqueue();
-	  }else{
-		// Relay it
- 		write(header.to_node);
-	  }
+        // Is this for us?
+        if ( header.to_node == node_address ){
+            // Add it to the buffer of frames for us if it is a user message.
+            IF_SERIAL_DEBUG(printf_P(PSTR("%lu: Received packet of type %d\n\r"),millis(),header.type));
+            if (header.type < 128) {
+                enqueue();
+            // if not, treat it as a system message.
+            } else {
+                treatSystemMessages();
+            }
+        }else{
+            // Relay it
+            write(header.to_node);
+        }
       // NOT NEEDED anymore.  Now all reading pipes are open to start.
 #if 0
       // If this was for us, from one of our children, but on our listening
@@ -127,6 +140,125 @@ void RF24Network::update(void)
 
 /******************************************************************/
 
+void RF24Network::sendBufferizedMessages(void) {
+    //TODO IMPLEMENT
+}
+  
+/******************************************************************/
+
+void RF24Network::sendConnectionAttempts(void) {
+    IF_SERIAL_DEBUG(printf_P(PSTR("%lu: SendConnAtt;\n\r"),millis()));
+    uint16_t currentTimestamp = millis();
+    Connection * connectionPos;
+    
+    for (int i = 0; i < NUMBER_OF_CONNECTIONS ; i++) {
+        connectionPos = &connections[i];
+        printConnectionProperties(connectionPos);
+        
+        if (!connectionPos->connected
+                && !connectionPos->dirty 
+                && connectionPos->connectionRetries < CONN_RETRIES
+                && connectionPos->connectionRetryTimestamp < currentTimestamp) {
+            IF_SERIAL_DEBUG(printf_P(PSTR("%lu: SendConnAtt; to node %o\n\r"),millis(),connectionPos->nodeAddress));
+            connectionPos->connectionRetries++;
+            connectionPos->connectionRetryTimestamp = currentTimestamp + connectionPos->delayBetweenMsg;
+            increaseConnectionDelay(connectionPos);
+            RF24NetworkHeader header(connectionPos->nodeAddress, MSG_SYN);
+            write(header, NULL, 0);
+            IF_SERIAL_DEBUG(printf_P(PSTR("%lu: SendConnAtt; sent to node: %o; delayBetweenMsg: %lu; connectionRetryTimestamp: %lu; currentRetries: %d;\n\r"),millis(),
+                    connectionPos->nodeAddress, connectionPos->delayBetweenMsg, connectionPos->connectionRetryTimestamp, connectionPos->connectionRetries));
+        } else if (!connectionPos->connected
+                && !connectionPos->dirty
+                && connectionPos->connectionRetries >= CONN_RETRIES) {
+            IF_SERIAL_DEBUG(printf_P(PSTR("%lu: SendConnAtt; timeout reached for node: %o; Setting connection dirty.\n\r"),millis(),connectionPos->nodeAddress));
+            connectionPos->dirty = true;
+            IF_SERIAL_DEBUG(printf_P(PSTR("%lu: SendConnAtt; timeout reached for node: %o; Setting connection dirty.\n\r"),millis(),connectionPos->nodeAddress));
+            if (connectionPos->connCallback != NULL) {
+                IF_SERIAL_DEBUG(printf_P(PSTR("%lu: SendConnAtt; Going to invoke connection handler with CONN_TIMEOUT.\n\r"),millis()));
+                ConnectionStatus status(CONN_TIMEOUT, connectionPos->nodeAddress);
+                connectionPos->connCallback(&status);
+            }
+        }
+
+    }
+}
+
+/******************************************************************/
+void RF24Network::printConnectionProperties(Connection * conn) {
+    
+    IF_SERIAL_DEBUG(printf_P(PSTR("%lu: Connection Properties; dirty: %s; to node: %o; connected: %s; lastMsgRcvdId: %d; ackSent: %s; currentRetries: %d; connectionRetryTimestamp: %lu; delayBetweenMsg: %lu; callback: %d; \n\r"),
+            millis(),
+            conn->dirty ? "true" : "false",
+            conn->nodeAddress,
+            conn->connected ? "true" : "false",
+            conn->lastMsgRcvdId,
+            conn->ackSent ? "true" : "false",
+            conn->connectionRetries,
+            conn->connectionRetryTimestamp,
+            conn->delayBetweenMsg,
+            conn->connCallback
+    ));
+    
+}
+
+
+void RF24Network::increaseConnectionDelay(Connection * connection) {
+    if (connection->delayBetweenMsg < (uint16_t) CONN_MAX_MSG_DELAY) {
+        connection->delayBetweenMsg = (connection->delayBetweenMsg) * 2;
+        IF_SERIAL_DEBUG(printf_P(PSTR("%lu: increaseConnDelay; node %o with %lu millis between messages\n\r"),millis(), connection->nodeAddress, connection->delayBetweenMsg));
+    }
+}
+
+/******************************************************************/
+
+void RF24Network::decreaseConnectionDelay(Connection * connection) {
+    if (connection->delayBetweenMsg > (uint16_t) CONN_MIN_MSG_DELAY) {
+        connection->delayBetweenMsg = (connection->delayBetweenMsg) / 2;
+        IF_SERIAL_DEBUG(printf_P(PSTR("%lu: decreaseConnDelay; node %o with %lu millis between messages\n\r"),millis(), connection->nodeAddress, connection->delayBetweenMsg));
+    }
+}
+/******************************************************************/
+
+void RF24Network::treatSystemMessages() {
+    IF_SERIAL_DEBUG(printf_P(PSTR("%lu: TreatSysMes \n\r"),millis()));
+    // Read the beginning of the frame as the header
+    const RF24NetworkHeader & header = * reinterpret_cast<RF24NetworkHeader*>(frame_buffer);
+    Connection* connection;
+
+    switch (header.type) {
+        IF_SERIAL_DEBUG(printf_P(PSTR("%lu: TreatSysMes, header type: %i\n\r"),millis(), header.type));
+        case MSG_SYN:
+            // Try getting an already open connection for this node or try opening a new one.
+            connection = getExistingOrAllocateNewConnection(header.from_node);
+            if (connection == NULL) {
+                IF_SERIAL_DEBUG(printf_P(PSTR("%lu: TreatSysMes, send MSG_CONN_REFUSED to node %o\n\r"),millis(),header.from_node));
+                // No connection is possible.
+                RF24NetworkHeader destinationHeader(header.from_node, MSG_CONN_REFUSED);
+                write(destinationHeader, NULL, 0);
+            } else {
+                IF_SERIAL_DEBUG(printf_P(PSTR("%lu: TreatSysMes, send MSG_SYN_ACK to node %o\n\r"),millis(),header.from_node));
+                // send a SYN_ACK for new connection of already existing connection.
+                RF24NetworkHeader destinationHeader(header.from_node, MSG_SYN_ACK); 
+                write(destinationHeader, NULL, 0);
+            }
+            break;
+        case MSG_SYN_ACK:
+            // Get the connection that originated this SYN_ACK.
+            connection = getDanglingConnection(header.from_node);
+            if (connection != NULL) { //if there is no connection for this node, simply ignore this message.
+                IF_SERIAL_DEBUG(printf_P(PSTR("%lu: TreatSysMes, set connected=true for node %o\n\r"),millis(),header.from_node));
+                connection->connected = true;
+                if (connection->connCallback != NULL) {
+                    ConnectionStatus status(CONN_SUCCESSFUL, connection->nodeAddress);
+                    connection->connCallback(&status);
+                }
+            }
+            break;
+    }
+}
+
+/******************************************************************/
+//TODO send ACK messages....
 bool RF24Network::enqueue(void)
 {
   bool result = false;
@@ -211,13 +343,139 @@ size_t RF24Network::read(RF24NetworkHeader& header,void* message, size_t maxlen)
 /******************************************************************/
 
 void RF24Network::connect(uint16_t nodeAddress, void (* callback)(ConnectionStatus *)) {
-    //TODO implement
+    Connection * connectionPos;
+        
+    IF_SERIAL_DEBUG(printf_P(PSTR("%lu: Connect;\n\r"),millis()));   
+    for (int i = 0; i < NUMBER_OF_CONNECTIONS ; i++) {
+        connectionPos = &connections[i];
+        IF_SERIAL_DEBUG(printf_P(PSTR("%lu: Connect; inside loop; connections: %d; connectionPos: %d;\n\r"),millis(), connections, connectionPos));
+        if (connectionPos->connected && !connectionPos->dirty && connectionPos->nodeAddress == nodeAddress) {
+            if (callback != NULL) {
+                IF_SERIAL_DEBUG(printf_P(PSTR("%lu: Connect; already conn to node %o\n\r"),millis(),nodeAddress));
+                ConnectionStatus status(CONN_ALREADY_CONNECTED, nodeAddress);
+                callback(&status);
+            }
+            return;
+        }
+        if (connectionPos->dirty) {
+            printConnectionProperties(connectionPos);
+            resetConnection(connectionPos, callback, false, nodeAddress);
+            printConnectionProperties(connectionPos);
+            IF_SERIAL_DEBUG(printf_P(PSTR("%lu: Connect; allocated for node %o\n\r"),millis(),nodeAddress));
+            return;
+        }
+
+    }
+
+    IF_SERIAL_DEBUG(printf_P(PSTR("%lu: Connect; exiting loop, connPosAddr: %lu \n\r"),millis(), connectionPos));
+    if (callback != NULL) {
+        IF_SERIAL_DEBUG(printf_P(PSTR("%lu: Connect; ERR, buff full for node %o. Invoking callback..\n\r"),millis(),nodeAddress));
+        ConnectionStatus status(CONN_NO_SPACE_AVAILABLE, nodeAddress);
+        callback(&status);
+    }
 }
   
 /******************************************************************/
-
+// TODO: implement remaining stuff...
 void RF24Network::sendReliable(uint16_t nodeAddress, const void* message, size_t len, void (*callback)(MessageStatus *)) {
-    //TODO implement
+    Connection * connection = getConnection(nodeAddress);
+
+    if (connection == NULL) {
+        if (callback != NULL) {
+            MessageStatus status(MSG_NOT_CONNECTED, nodeAddress);
+            callback(&status);
+        }
+        return;
+    } else {
+        if (currentFreeMessageBufferPosition >= BUFFER_SIZE) {
+            if (callback != NULL) {
+                MessageStatus status(MSG_BUFFER_FULL, nodeAddress);
+                callback(&status);
+            }
+            return;
+        }
+
+        Message bufferPosition =  sendMessageBuffer[currentFreeMessageBufferPosition];
+        bufferPosition.destinationNode = nodeAddress;
+        bufferPosition.dirty = false;
+        bufferPosition.retries = 0;
+        bufferPosition.messageCallback = callback;
+        bufferPosition.retryTimeout = connection->delayBetweenMsg + millis();
+        memcpy(bufferPosition.message,message,len);
+
+    }
+}
+
+/******************************************************************/
+// This method is used only internally, when receiving a SYN message.
+Connection * RF24Network::getExistingOrAllocateNewConnection(uint16_t nodeAddress) {
+    Connection * connectionPos;
+
+    IF_SERIAL_DEBUG(printf_P(PSTR("%lu: getExOrAllNew; \n\r"),millis()));
+    for (int i = 0; i < NUMBER_OF_CONNECTIONS ; i++) {
+        connectionPos = &connections[i];
+        if (!connectionPos->dirty && connectionPos->nodeAddress == nodeAddress) {
+            IF_SERIAL_DEBUG(printf_P(PSTR("%lu: getExOrAllNew; setting conn true for existing conn of node %o\n\r"),millis(), nodeAddress));   
+            connectionPos->connected = true;
+            return connectionPos;
+        } else if (connectionPos->dirty == true) {
+            IF_SERIAL_DEBUG(printf_P(PSTR("%lu: getExOrAllNew; allocated new conn for node %o\n\r"),millis(), nodeAddress));  
+            resetConnection(connectionPos, NULL, true, nodeAddress);
+            return connectionPos;
+        }
+
+    }
+
+    return NULL;
+}
+
+/******************************************************************/
+
+void RF24Network::resetConnection(Connection * connection, void (* callback)(ConnectionStatus *), bool connected, uint8_t nodeAddress) {
+    IF_SERIAL_DEBUG(printf_P(PSTR("%lu: resetConn; node: %o; conn: %d\n\r"),millis(),nodeAddress, connected)); 
+    connection->nodeAddress = nodeAddress;
+    connection->lastMsgRcvdId = 0;
+    connection->ackSent = true;
+    connection->connected = connected;
+    connection->dirty = false;
+    connection->connectionRetryTimestamp = millis(); //when to send next connection attempt.
+    connection->delayBetweenMsg = CONN_MIN_MSG_DELAY;
+    connection->connectionRetries = 0;
+    connection->connCallback = callback;
+}
+
+/******************************************************************/
+// Get a connection which isn't dirty but has not yet received a SYN_ACK confirmation for the nodeAddress passed as parameter.
+Connection * RF24Network::getDanglingConnection(uint16_t nodeAddress) {
+    Connection * connectionPos;
+    IF_SERIAL_DEBUG(printf_P(PSTR("%lu: getDanglingConnection;\n\r"),millis())); 
+    for (int i = 0; i < NUMBER_OF_CONNECTIONS ; i++) {
+        connectionPos = &connections[i];
+        if (!connectionPos->connected && !connectionPos->dirty && connectionPos->nodeAddress == nodeAddress) {
+            IF_SERIAL_DEBUG(printf_P(PSTR("%lu: getDanglingConnection; found dangling conn for node %o\n\r"),millis(), nodeAddress)); 
+            return connectionPos;
+        }
+
+    }
+
+    return NULL;
+}
+
+/******************************************************************/
+
+Connection * RF24Network::getConnection(uint16_t nodeAddress) {
+    Connection * connectionPos;
+    IF_SERIAL_DEBUG(printf_P(PSTR("%lu: getConnection;\n\r"),millis())); 
+    for (int i = 0; i < NUMBER_OF_CONNECTIONS ; i++) {
+        connectionPos = &connections[i];
+        if (connectionPos->connected && !connectionPos->dirty && connectionPos->nodeAddress == nodeAddress) {
+            IF_SERIAL_DEBUG(printf_P(PSTR("%lu: getConnection; found conn for node: %o\n\r"),millis(), nodeAddress));
+            return connectionPos;
+        }
+
+    }
+
+    return NULL;
 }
 
 /******************************************************************/
@@ -244,7 +502,7 @@ bool RF24Network::write(RF24NetworkHeader& header,const void* message, size_t le
     // Just queue it in the received queue
     return enqueue();
   else
-    // Otherwise send it out over the air
+    // Otherwise send it out over the air, non-reliably, reliability is ensured on peer nodes
     return write(header.to_node);
 }
 

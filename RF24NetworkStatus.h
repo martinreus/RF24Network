@@ -18,9 +18,11 @@
 #define MSG_NOT_CONNECTED 137
 
 // Feedback statuses for when establishing a connection to another node.
-#define CONN_REFUSED -2
-#define CONN_TIMEOUT -1
-#define CONN_SUCCESS 1
+#define CONN_NO_SPACE_AVAILABLE -3 //connection control structure array on this node is full
+#define CONN_REFUSED -2 // connection refused on target node
+#define CONN_TIMEOUT -1 // connection timeout (for an unknown reason)
+#define CONN_SUCCESSFUL 1 // connection attempt was successful
+#define CONN_ALREADY_CONNECTED 0 //already connected
 
 /**
  * A message status is given as argument when invoking the callback function passed as parameter of the
@@ -29,10 +31,10 @@
  * that succeeded or failed to be sent.
  */
 struct MessageStatus {
-    uint8_t statusCode;
+    int8_t statusCode;
     uint16_t msgId;
 
-    MessageStatus(uint8_t status, uint16_t messageId): statusCode(status), msgId(messageId) {};
+    MessageStatus(int8_t status, uint16_t messageId): statusCode(status), msgId(messageId) {};
 };
 
 /**

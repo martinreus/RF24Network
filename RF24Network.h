@@ -15,6 +15,9 @@
 #ifndef __RF24NETWORK_H__
 #define __RF24NETWORK_H__
 
+#define NUMBER_OF_CONNECTIONS 10 // total number of connections a node can handle
+#define BUFFER_SIZE 6 // buffer size for sending reliable messages
+
 /**
  * @file RF24Network.h
  *
@@ -80,7 +83,7 @@ struct RF24NetworkHeader
    * @param _type The type of message which follows.  Only 0-127 are allowed for
    * user messages.
    */
-  RF24NetworkHeader(uint16_t _to, unsigned char _type = 0): to_node(_to), id(next_id++), type(_type&0x7f) {}
+  RF24NetworkHeader(uint16_t _to, unsigned char _type = 0): to_node(_to), id(next_id++), type(_type) {}
 
   /**
    * Create debugging string
@@ -174,6 +177,21 @@ public:
    * CONN_TIMEOUT
    */
   void connect(uint16_t nodeAddress, void (* callback)(ConnectionStatus *));
+    
+  /**
+   * Send a message unreliably. This should now be used only within the context of this library.
+   * Please be aware that calling this method does not guarantee message delivery when it needs to be routed
+   * through other nodes in the network. Use sendReliable instead.
+   *
+   * @note Optimization: Extended timeouts/retries enabled. See txTimeout for more info.
+   * @param[in,out] header The header (envelope) of this message.  The critical
+   * thing to fill in is the @p to_node field so we know where to send the
+   * message.  It is then updated with the details of the actual header sent.
+   * @param message Pointer to memory where the message is located
+   * @param len The size of the message
+   * @return Whether the message was successfully received
+   */
+  bool write(RF24NetworkHeader& header, const void* message, size_t len);
 
   /**
    * Send a message reliably. This method puts a message into a buffer if there is
@@ -182,7 +200,7 @@ public:
    * or failure statuses are handed to the callback function pointer passed as argument.
    * Please be aware that in order to send a message reliably, first one needs to
    * establish a connection to a node using the connect() method.
-   * Call to this method is non-blocking.
+   * A call to this method is non-blocking.
    * Trying to call this method while in the update loop of this library will render no action.
    *
    * @note Optimization: Extended timeouts/retries enabled. See txTimeout for more info.
@@ -194,26 +212,6 @@ public:
    * @param callback A callback function pointer to handle statuses for this call.
    */
   void sendReliable(uint16_t nodeAddress, const void* message, size_t len, void (*callback)(MessageStatus *));
-
-  /**
-   * Send a message unreliably. This was maintained for compatibility purposes. Please be aware
-   * that calling this method does not guarantee message delivery between nodes that require multiple hops.
-   * Also note that the message id (which is controlled by an internal connection structure for each node)
-   * must be respected in order not to be dropped on the receiver node, if the node is also running
-   * this version of the RF24Network library. For example: if a message was sent reliably to a node
-   * and this message was given an id 3, an unreliable message MUST be sent with id 4, or
-   * else it will be dropped on the receiving node.
-   * Trying to call this method while in the update loop of this library will render no action.
-   *
-   * @note Optimization: Extended timeouts/retries enabled. See txTimeout for more info.
-   * @param[in,out] header The header (envelope) of this message.  The critical
-   * thing to fill in is the @p to_node field so we know where to send the
-   * message.  It is then updated with the details of the actual header sent.
-   * @param message Pointer to memory where the message is located
-   * @param len The size of the message
-   * @return Whether the message was successfully received
-   */
-  bool write(RF24NetworkHeader& header, const void* message, size_t len);
 
   /**
    * Sleep this node - Still Under Development
@@ -304,13 +302,58 @@ private:
   uint16_t direct_child_route_to( uint16_t node );
   uint8_t pipe_to_descendant( uint16_t node );
   void setup_address(void);
+  /**
+   *  Get an existing connection for the target node. If no connection is returned, there is no active connection.
+   */
+  Connection * getConnection(uint16_t nodeAddress);
+  /**
+   * Try getting or creating (this is, allocating) a connection for the given address.
+   * If there is no connection or creating a new connection is not possible because the connection buffer is full,
+   * a NULL is returned.
+   */
+  Connection * getExistingOrAllocateNewConnection(uint16_t nodeAddress);
+  /**
+   * Helper method that resets a used connection structure to its initial default values so it can be used again for
+   * other connection to another node.
+   */
+  void resetConnection(Connection * connection, void (* callback)(ConnectionStatus *), bool connected, uint8_t nodeAddres);
+  /**
+   * Get a connection which isn't dirty but has not yet received a SYN_ACK confirmation for the nodeAddress passed as parameter.
+   */
+  Connection * getDanglingConnection(uint16_t nodeAddress);
+  // Increases delay for when to send a next message.
+  void increaseConnectionDelay(Connection * connection);
+  // Decreases delay for when to send a next message.
+  void decreaseConnectionDelay(Connection * connection);
+  /**
+   * Treat all non-user messages, like ACK, SYN_ACK and other system messages.
+   */
+  void treatSystemMessages();
+  /**
+   * Reads and processes all messages received on the radio module.
+   */
+  void readMessages(void);
+  /**
+   * Inside the update loop, send all messages that were bufferized by the user.
+   */
+  void sendBufferizedMessages(void);
+  /**
+   * Send connection attempts to all nodes the user wishes to connect.
+   */
+  void sendConnectionAttempts(void);
 
+  void printConnectionProperties(Connection * conn);
+  
 private:
   RF24& radio; /**< Underlying radio driver, provides link/physical layers */
 
 #if defined (DUAL_HEAD_RADIO)
   RF24& radio1;
 #endif
+  
+  uint8_t currentFreeMessageBufferPosition; // TODO use in send message
+  Message sendMessageBuffer[BUFFER_SIZE];
+  Connection connections[NUMBER_OF_CONNECTIONS];
   uint16_t node_address; /**< Logical node address of this unit, 1 .. UINT_MAX */
   uint8_t frame_buffer[FRAME_SIZE]; /**< Space to put the frame that will be sent/received over the air */
   uint8_t frame_queue[5*FRAME_SIZE]; /**< Space for a small set of frames that need to be delivered to the app layer */
