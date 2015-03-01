@@ -23,7 +23,7 @@ bool is_valid_address( uint16_t node );
 
 /******************************************************************/
 #if !defined (DUAL_HEAD_RADIO)
-RF24Network::RF24Network( RF24& _radio ): radio(_radio), next_frame(frame_queue), currentFreeMessageBufferPosition(0)
+RF24Network::RF24Network( RF24& _radio ): radio(_radio), next_frame(frame_queue), currentFreeMessageBufferPosition(0), nextHeartbeatSend(0)
 {
 }
 #else
@@ -78,6 +78,8 @@ void RF24Network::update(void) {
     IF_SERIAL_DEBUG(printf_P(PSTR("%lu: update\n\r"),millis()));
     readMessages();
     sendConnectionAttempts();
+    sendHeartbeatRequests();
+    
 }
 
 /******************************************************************/
@@ -153,24 +155,24 @@ void RF24Network::sendConnectionAttempts(void) {
     
     for (int i = 0; i < NUMBER_OF_CONNECTIONS ; i++) {
         connectionPos = &connections[i];
-        printConnectionProperties(connectionPos);
+        IF_SERIAL_DEBUG(printConnectionProperties(connectionPos));
         
         if (!connectionPos->connected
                 && !connectionPos->dirty 
                 && connectionPos->connectionRetries < CONN_RETRIES
                 && connectionPos->connectionRetryTimestamp < currentTimestamp) {
-            IF_SERIAL_DEBUG(printf_P(PSTR("%lu: SendConnAtt; to node %o\n\r"),millis(),connectionPos->nodeAddress));
+            IF_SERIAL_DEBUG(printf_P(PSTR("%lu: SCA; tN %o\n\r"),millis(),connectionPos->nodeAddress));
             connectionPos->connectionRetries++;
             connectionPos->connectionRetryTimestamp = currentTimestamp + connectionPos->delayBetweenMsg;
             increaseConnectionDelay(connectionPos);
             RF24NetworkHeader header(connectionPos->nodeAddress, MSG_SYN);
             write(header, NULL, 0);
-            IF_SERIAL_DEBUG(printf_P(PSTR("%lu: SendConnAtt; sent to node: %o; delayBetweenMsg: %lu; connectionRetryTimestamp: %lu; currentRetries: %d;\n\r"),millis(),
+            IF_SERIAL_DEBUG(printf_P(PSTR("%lu: SCA; tN: %o; dBM: %lu; cRT: %lu; cR: %d;\n\r"),millis(),
                     connectionPos->nodeAddress, connectionPos->delayBetweenMsg, connectionPos->connectionRetryTimestamp, connectionPos->connectionRetries));
         } else if (!connectionPos->connected
                 && !connectionPos->dirty
                 && connectionPos->connectionRetries >= CONN_RETRIES) {
-            IF_SERIAL_DEBUG(printf_P(PSTR("%lu: SendConnAtt; timeout reached for node: %o; Setting connection dirty.\n\r"),millis(),connectionPos->nodeAddress));
+            IF_SERIAL_DEBUG(printf_P(PSTR("%lu: SCA; timeout reached for node: %o; Setting connection dirty.\n\r"),millis(),connectionPos->nodeAddress));
             connectionPos->dirty = true;
             IF_SERIAL_DEBUG(printf_P(PSTR("%lu: SendConnAtt; timeout reached for node: %o; Setting connection dirty.\n\r"),millis(),connectionPos->nodeAddress));
             if (connectionPos->connCallback != NULL) {
@@ -184,22 +186,32 @@ void RF24Network::sendConnectionAttempts(void) {
 }
 
 /******************************************************************/
+#ifdef SERIAL_DEBUG
 void RF24Network::printConnectionProperties(Connection * conn) {
     
-    IF_SERIAL_DEBUG(printf_P(PSTR("%lu: Connection Properties; dirty: %s; to node: %o; connected: %s; lastMsgRcvdId: %d; ackSent: %s; currentRetries: %d; connectionRetryTimestamp: %lu; delayBetweenMsg: %lu; callback: %d; \n\r"),
+    printf_P(PSTR("%lu: ConnProp; drt: %s; tN: %o; cn: %s; lMRI: %d; aS: %s; cR: %d; cRT: %lu; dBM: %lu; clb: %d; FR: %d \n\r"),
             millis(),
-            conn->dirty ? "true" : "false",
+            conn->dirty ? "t" : "f",
             conn->nodeAddress,
-            conn->connected ? "true" : "false",
+            conn->connected ? "t" : "f",
             conn->lastMsgRcvdId,
-            conn->ackSent ? "true" : "false",
+            conn->ackSent ? "t" : "f",
             conn->connectionRetries,
             conn->connectionRetryTimestamp,
             conn->delayBetweenMsg,
-            conn->connCallback
-    ));
+            conn->connCallback,
+            freeRam()
+    );
     
 }
+
+int RF24Network::freeRam (void) {
+  extern int __heap_start, *__brkval; 
+  int v; 
+  return (int) &v - (__brkval == 0 ? (int) &__heap_start : (int) __brkval); 
+}
+
+#endif
 
 
 void RF24Network::increaseConnectionDelay(Connection * connection) {
@@ -254,7 +266,76 @@ void RF24Network::treatSystemMessages() {
                 }
             }
             break;
+        case MSG_CONN_REFUSED:
+            // Get the connection regarding this MSG_CONN_REFUSED.
+            connection = getDanglingConnection(header.from_node);
+            if (connection != NULL) { //if there is no connection for this node, simply ignore this message.
+                IF_SERIAL_DEBUG(printf_P(PSTR("%lu: TreatSysMes, conn refused for node %o\n\r"),millis(),header.from_node));
+                connection->dirty = true;
+                if (connection->connCallback != NULL) {
+                    ConnectionStatus status(CONN_REFUSED, connection->nodeAddress);
+                    connection->connCallback(&status);
+                }
+            }
+            break;
+        case MSG_HEARTBEAT_REQ:
+            IF_SERIAL_DEBUG(printf_P(PSTR("%lu: TreatSysMes, heartbeat request from node %o\n\r"),millis(),header.from_node));
+            // Get the connection that the other node wants to test.
+            connection = getConnection(header.from_node);
+            if (connection != NULL) {
+                IF_SERIAL_DEBUG(printf_P(PSTR("%lu: TreatSysMes, sending heartbeat response to node %o\n\r"),millis(),header.from_node));
+                connection->heartbeatRetries = 0;
+                RF24NetworkHeader destinationHeader(header.from_node, MSG_HEARTBEAT_ACK); 
+                write(destinationHeader, NULL, 0);
+            }
+            //TODO when not connected, send not connected message...
+            break;
+        case MSG_HEARTBEAT_ACK:
+            IF_SERIAL_DEBUG(printf_P(PSTR("%lu: TreatSysMes, heartbeat ack from node %o\n\r"),millis(),header.from_node));
+            // Get the connection for which we sent a heartbeat request.
+            connection = getConnection(header.from_node);
+            if (connection != NULL) {
+                connection->heartbeatRetries = 0;
+            }                 
+            break;
     }
+}
+
+/******************************************************************/
+
+void RF24Network:: sendHeartbeatRequests(void) {
+    long currentMillis = millis();
+    IF_SERIAL_DEBUG(printf_P(PSTR("%lu: sendHeartbeatRequests; \n\r"),millis()));
+
+    //if it is not time to send heartbeat requests, just return.
+    if (currentMillis < nextHeartbeatSend) {
+        return;       
+    }
+    
+    Connection * connectionPos;
+    
+    for (int i = 0; i < NUMBER_OF_CONNECTIONS ; i++) {
+        connectionPos = &connections[i];
+        if (!connectionPos->dirty && connectionPos->connected && connectionPos->heartbeatRetries < CONN_MAX_HEARTBEAT_RETRIES) {
+            IF_SERIAL_DEBUG(printf_P(PSTR("%lu: sendHeartbeatRequests; sending heartbeat to node %o\n\r"),millis(), connectionPos->nodeAddress));
+            RF24NetworkHeader header(connectionPos->nodeAddress, MSG_HEARTBEAT_ACK);
+            write(header, NULL, 0);
+            connectionPos->heartbeatRetries++;
+        } else if (!connectionPos->dirty && connectionPos->connected && connectionPos->heartbeatRetries >= CONN_MAX_HEARTBEAT_RETRIES) {
+            IF_SERIAL_DEBUG(printf_P(PSTR("%lu: sendHeartbeatRequests; heartbeat timed out; closing connection to node %o\n\r"),millis(), connectionPos->nodeAddress));
+            // We did not receive a heartbeat response, so the other node is either dead or connection was closed on the other side.
+            // We just close our side of the connection.
+            connectionPos->dirty = true;
+            //if there is a connection handler, invoke it with connection timed out.
+            if (connectionPos->connCallback != NULL) {
+                IF_SERIAL_DEBUG(printf_P(PSTR("%lu: sendHeartbeatRequests; invoking connection callback with CONN_TIMEOUT\n\r"),millis()));
+                 ConnectionStatus status(CONN_TIMEOUT, connectionPos->nodeAddress);
+                 connectionPos->connCallback(&status);
+            }
+        }
+    }
+    
+    nextHeartbeatSend = currentMillis + (1000 * CONN_HEARTBEAT_INTERVAL);
 }
 
 /******************************************************************/
@@ -358,9 +439,9 @@ void RF24Network::connect(uint16_t nodeAddress, void (* callback)(ConnectionStat
             return;
         }
         if (connectionPos->dirty) {
-            printConnectionProperties(connectionPos);
+            IF_SERIAL_DEBUG(printConnectionProperties(connectionPos));
             resetConnection(connectionPos, callback, false, nodeAddress);
-            printConnectionProperties(connectionPos);
+            IF_SERIAL_DEBUG(printConnectionProperties(connectionPos));
             IF_SERIAL_DEBUG(printf_P(PSTR("%lu: Connect; allocated for node %o\n\r"),millis(),nodeAddress));
             return;
         }
@@ -442,6 +523,7 @@ void RF24Network::resetConnection(Connection * connection, void (* callback)(Con
     connection->delayBetweenMsg = CONN_MIN_MSG_DELAY;
     connection->connectionRetries = 0;
     connection->connCallback = callback;
+    connection->heartbeatRetries = 0;
 }
 
 /******************************************************************/

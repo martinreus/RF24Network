@@ -342,8 +342,17 @@ private:
    */
   void sendConnectionAttempts(void);
 
-  void printConnectionProperties(Connection * conn);
+  /**
+   * Send heartbeat requests for all alive connections. If no reply is given after CONN_MAX_HEARTBEAT_RETRIES, the
+   * connection is automatically closed.
+   */
+  void sendHeartbeatRequests(void);
   
+#ifdef SERIAL_DEBUG
+  void printConnectionProperties(Connection * conn);
+  int freeRam(void);
+#endif
+
 private:
   RF24& radio; /**< Underlying radio driver, provides link/physical layers */
 
@@ -351,6 +360,7 @@ private:
   RF24& radio1;
 #endif
   
+  long nextHeartbeatSend;
   uint8_t currentFreeMessageBufferPosition; // TODO use in send message
   Message sendMessageBuffer[BUFFER_SIZE];
   Connection connections[NUMBER_OF_CONNECTIONS];

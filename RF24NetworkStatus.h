@@ -7,16 +7,6 @@
 #ifndef RF24NETWORKSTATUS_H
 #define	RF24NETWORKSTATUS_H
 
-// Reserved message types sent between nodes. Message types ranging from 0-127 are user defined messages.
-#define MSG_ACK 130
-#define MSG_SYN 131
-#define MSG_SYN_ACK 132
-#define MSG_BUFFER_FULL 133
-#define MSG_CONN_REFUSED 134
-#define MSG_DISCONNECT 135
-#define MSG_DISCONNECT_ACK 136
-#define MSG_NOT_CONNECTED 137
-
 // Feedback statuses for when establishing a connection to another node.
 #define CONN_NO_SPACE_AVAILABLE -3 //connection control structure array on this node is full
 #define CONN_REFUSED -2 // connection refused on target node
