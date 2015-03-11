@@ -26,7 +26,6 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include "RF24NetworkStatus.h"
 #include "RF24NetworkStructs.h"
 
 class RF24;
@@ -211,7 +210,7 @@ public:
    * @param len The size of the message
    * @param callback A callback function pointer to handle statuses for this call.
    */
-  void sendReliable(uint16_t nodeAddress, const void* message, size_t len, void (*callback)(MessageStatus *));
+  void sendReliable(RF24NetworkHeader * header, const void* message, size_t len, void (*callback)(MessageStatus *));
 
   /**
    * Sleep this node - Still Under Development
@@ -348,9 +347,27 @@ private:
    */
   void sendHeartbeatRequests(void);
   
+  /**
+   * Purge a message from the message buffer.
+   * @param bufferPos
+   */
+  void purgeBufferedMessage(int bufferPos);
+  
+  /**
+   * Gets the next available message buffer position.
+   */
+  Message * getNextFreeMessageBufferPosition();
+  
+  /**
+   * Reset message parameters
+   * @param message
+   */
+  void prepareMessage(Message * message);
+  
 #ifdef SERIAL_DEBUG
   void printConnectionProperties(Connection * conn);
   int freeRam(void);
+  void printMessage(Message * message);
 #endif
 
 private:
@@ -361,7 +378,7 @@ private:
 #endif
   
   long nextHeartbeatSend;
-  uint8_t currentFreeMessageBufferPosition; // TODO use in send message
+  uint8_t messageBufferUsedPositions; // TODO use in send message
   Message sendMessageBuffer[BUFFER_SIZE];
   Connection connections[NUMBER_OF_CONNECTIONS];
   uint16_t node_address; /**< Logical node address of this unit, 1 .. UINT_MAX */
