@@ -58,8 +58,6 @@ struct RF24NetworkHeader
   unsigned char type; 
   unsigned char reserved; /**< Reserved for future use */
 
-  static uint16_t next_id; /**< The message ID of the next message to be sent TODO: remove*/
-
   /**
    * Default constructor
    *
@@ -82,7 +80,7 @@ struct RF24NetworkHeader
    * @param _type The type of message which follows.  Only 0-127 are allowed for
    * user messages.
    */
-  RF24NetworkHeader(uint16_t _to, unsigned char _type = 0): to_node(_to), id(next_id++), type(_type) {}
+  RF24NetworkHeader(uint16_t _to, unsigned char _type = 0): to_node(_to), type(_type) {}
 
   /**
    * Create debugging string
@@ -333,6 +331,12 @@ private:
    */
   void readMessages(void);
   /**
+   * Clean all messages from send buffer and all messages with id greater than the id
+   * of the message that timed out, even if said messages did not timed out. The client
+   * of this library must then send all these messages again.
+   */
+  void cleanUpTimedOutMessages(void);
+  /**
    * Inside the update loop, send all messages that were bufferized by the user.
    */
   void sendBufferizedMessages(void);
@@ -354,9 +358,9 @@ private:
   void purgeBufferedMessage(int bufferPos);
   
   /**
-   * Gets the next available message buffer position.
+   * Gets the next available message buffer position for a given connection represented by targetNodeAddress.
    */
-  Message * getNextFreeMessageBufferPosition();
+  Message * getNextFreeMessageBufferPosition(uint16_t targetNodeAddress);
   
   /**
    * Reset message parameters
