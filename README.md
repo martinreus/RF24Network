@@ -6,10 +6,11 @@ Currently implementing a simplified way to connect and reliably send packets ove
 ## What has been developed so far:
 
 - Establishing a connection between nodes, with heartbeat sending to detect connection loss or failure of one node.
+- Sending bufferized messages. Handlers are used to check whether this message was received or not. Messages are resent if an ACK was not received.
 
 ## What is being developed / has to be done:
 
-- Sending and acking of messages through the network
+- Receiving and acking messages through the network.
 
 Please see the full documentation at http://tmrh20.github.io/RF24Network/
 

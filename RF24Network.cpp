@@ -456,6 +456,8 @@ void RF24Network:: sendHeartbeatRequests(void) {
             connectionPos->dirty = true;
             //if there is a connection handler, invoke it with connection timed out.
             if (connectionPos->connCallback != NULL) {
+                IF_SERIAL_DEBUG(printf_P(PSTR("%lu: sendHeartbeatRequests; conn timedout. Purging messages from buffer..\n"),millis()));
+                purgeMessagesForTimedOutConn(connectionPos);
                 IF_SERIAL_DEBUG(printf_P(PSTR("%lu: sendHeartbeatRequests; invoking connection callback with CONN_TIMEOUT\n"),millis()));
                 ConnectionStatus status(CONN_TIMEOUT, connectionPos->nodeAddress);
                 connectionPos->connCallback(&status);
@@ -465,6 +467,35 @@ void RF24Network:: sendHeartbeatRequests(void) {
 
     nextHeartbeatSend = currentMillis + (1000 * CONN_HEARTBEAT_INTERVAL);
 }
+
+/******************************************************************/
+void RF24Network::purgeMessagesForTimedOutConn(Connection * conn){
+    IF_SERIAL_DEBUG(printf_P(PSTR("%lu: purgeMessagesForTimedOutConn;\n"),millis()));
+    Message * initialPositionToMove = NULL;
+    RF24NetworkHeader * currentHeader;
+    uint8_t foundMessages = 0;
+
+    for (uint8_t i = 0 ; i < messageBufferUsedPositions; i++ ) {
+        currentHeader = reinterpret_cast<RF24NetworkHeader *>(sendMessageBuffer[i].payload);
+        
+        if (currentHeader->to_node == conn->nodeAddress) {
+            IF_SERIAL_DEBUG(printf_P(PSTR("%lu: purgeMessagesForTimedOutConn; found message.\n"),millis()));
+            IF_SERIAL_DEBUG(printMessage(&sendMessageBuffer[i]));
+            if (initialPositionToMove == NULL) {
+                initialPositionToMove = &sendMessageBuffer[i];
+            }
+            foundMessages++;
+        }
+    }
+    
+    if (foundMessages > 0) {
+        //remove messages from buffer by moving 
+        IF_SERIAL_DEBUG(printf_P(PSTR("%lu: moving %i positions [moving %i bytes from %i to %i]\n"),millis(),foundMessages,sizeof(Message) * (messageBufferUsedPositions - foundMessages),initialPositionToMove + foundMessages,initialPositionToMove));
+        memmove(initialPositionToMove, initialPositionToMove + foundMessages, sizeof(Message) * (messageBufferUsedPositions - foundMessages));
+        messageBufferUsedPositions -= foundMessages;
+    }
+}
+
 
 /******************************************************************/
 //TODO send ACK messages....

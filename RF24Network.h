@@ -363,6 +363,11 @@ private:
   Message * getNextFreeMessageBufferPosition(uint16_t targetNodeAddress);
   
   /**
+   * Purges any remaining message in the message buffer for a connection that is not valid anymore.
+   */
+  void purgeMessagesForTimedOutConn(Connection * conn);
+  
+  /**
    * Reset message parameters
    * @param message
    */
