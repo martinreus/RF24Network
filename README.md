@@ -1,4 +1,15 @@
-# TMRh20 2014 - Newly Optimized Network Layer for nRF24L01(+) radios
+# martinreus 2015 - This is a work in progress! Lots of bugs and broken functionality!
+( Shouldn't be commiting on master, by the way =P )
+
+Currently implementing a simplified way to connect and reliably send packets over the original implementation of this excelent library.
+
+## What has been developed so far:
+
+- Establishing a connection between nodes, with heartbeat sending to detect connection loss or failure of one node.
+
+## What is being developed / has to be done:
+
+- Sending and acking of messages through the network
 
 Please see the full documentation at http://tmrh20.github.io/RF24Network/
 
