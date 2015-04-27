@@ -76,10 +76,26 @@ void RF24Network::begin(uint8_t _channel, uint16_t _node_address )
 void RF24Network::update(void) {
     IF_SERIAL_DEBUG(printf_P(PSTR("%lu: update\n"),millis()));
     readMessages();
-//    sendAcks();
+    sendAcks();
     sendConnectionAttempts();
     sendHeartbeatRequests();
     sendBufferizedMessages();
+}
+
+/******************************************************************/
+
+void RF24Network::sendAcks(){
+    IF_SERIAL_DEBUG(printf_P(PSTR("%lu: sendAcks\n"),millis()));
+    for (Connection * connection = connections; connection <= &connections[NUMBER_OF_CONNECTIONS]; connection++) {
+        IF_SERIAL_DEBUG(printf_P(PSTR("%lu: connection iter: %i; Conn start: %i;\n"),millis(), connection, connections));
+        if (connection->connected && !connection->ackSent) {
+            IF_SERIAL_DEBUG(printf_P(PSTR("%lu: Connection found with acks to send. ConnNumber: %i; ackId: %i;\n"),millis(),connection->nodeAddress, connection->lastMsgRcvdId));
+            RF24NetworkHeader header(connection->nodeAddress, MSG_ACK);
+            write(header, NULL, 0);
+            IF_SERIAL_DEBUG(printf_P(PSTR("%lu: Ack sent!\n"),millis()));
+            connection->ackSent = true;
+        }
+    }
 }
 
 /******************************************************************/

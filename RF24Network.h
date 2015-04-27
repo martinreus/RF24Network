@@ -386,6 +386,13 @@ private:
    */
   bool smaller(uint8_t a, uint8_t b);
 
+  
+  /**
+   * Sends acks to received messages from other nodes to this one.
+   */
+  void sendAcks();
+
+  
   /**
    * Reset message parameters
    * @param message
