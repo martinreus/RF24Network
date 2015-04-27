@@ -76,6 +76,7 @@ void RF24Network::begin(uint8_t _channel, uint16_t _node_address )
 void RF24Network::update(void) {
     IF_SERIAL_DEBUG(printf_P(PSTR("%lu: update\n"),millis()));
     readMessages();
+//    sendAcks();
     sendConnectionAttempts();
     sendHeartbeatRequests();
     sendBufferizedMessages();
@@ -178,7 +179,7 @@ void RF24Network::sendBufferizedMessages(void) {
             message->retries++;
             message->retryTimeout = millis() + connection->delayBetweenMsg;
         // if the message was already tried to be sent MSG_SENDING_MAX_RETRIES times or it has an invalid id, then purge it from the buffer.
-        } else if (message->retries >= MSG_SENDING_MAX_RETRIES || connection->lastMessageIdSent < header->id) {
+        } else if (message->retries >= MSG_SENDING_MAX_RETRIES || smaller(connection->lastMessageIdSent,header->id)) {
             // if the message has timed out, but the message id is still valid, we invalidate all messages with id's greater than this message->id,
             // so that the next messages after this one are purged too. That is, we are purging all messages with id greater than this one which
             // has failed MSG_SENDING_MAX_RETRIES times for a single target node.
@@ -340,7 +341,7 @@ void RF24Network::sendConnectionAttempts(void) {
     }
 }
 
-
+/******************************************************************/
 
 void RF24Network::increaseConnectionDelay(Connection * connection) {
     if (connection->delayBetweenMsg < (uint16_t) CONN_MAX_MSG_DELAY) {
@@ -426,6 +427,17 @@ void RF24Network::treatSystemMessages() {
                 connection->heartbeatRetries = 0;
             }
             break;
+        case MSG_ACK:
+            IF_SERIAL_DEBUG(printf_P(PSTR("%lu: TreatSysMes, ack from node %o\n"),millis(),header.from_node));
+            // Get the connection for which we sent a heartbeat request.
+            connection = getConnection(header.from_node);
+            if (connection != NULL) {
+                //assuming we have a correct id in the payload,
+                const uint8_t ackedId = * reinterpret_cast<uint8_t*>(frame_buffer + sizeof(RF24NetworkHeader));
+                IF_SERIAL_DEBUG(printf_P(PSTR("%lu: Node %o received our messages until id %i.\n"),millis(),header.from_node,ackedId));
+                purgeSentMessagesFromSendBufferUpUntil(connection, ackedId);
+            }
+            break;
     }
 }
 
@@ -454,7 +466,7 @@ void RF24Network:: sendHeartbeatRequests(void) {
             // We did not receive a heartbeat response, so the other node is either dead or connection was closed on the other side.
             // We just close our side of the connection.
             connectionPos->dirty = true;
-            //if there is a connection handler, invoke it with connection timed out.
+            //if there is a connection handler, invoke it with connection timed out after purging all messages that are still in the buffer.
             if (connectionPos->connCallback != NULL) {
                 IF_SERIAL_DEBUG(printf_P(PSTR("%lu: sendHeartbeatRequests; conn timedout. Purging messages from buffer..\n"),millis()));
                 purgeMessagesForTimedOutConn(connectionPos);
@@ -466,6 +478,19 @@ void RF24Network:: sendHeartbeatRequests(void) {
     }
 
     nextHeartbeatSend = currentMillis + (1000 * CONN_HEARTBEAT_INTERVAL);
+}
+
+/******************************************************************/
+void RF24Network::purgeSentMessagesFromSendBufferUpUntil(Connection * connection, uint8_t ackedId){
+    RF24NetworkHeader * messageHeader;
+    for (uint8_t i = messageBufferUsedPositions - 1; i >= 0; i-- ) {
+        messageHeader = reinterpret_cast<RF24NetworkHeader *>(sendMessageBuffer[i].payload);
+        
+        if (messageHeader->to_node == connection->nodeAddress && smallerOrEqual(messageHeader->id, ackedId)) {
+            IF_SERIAL_DEBUG(printf_P(PSTR("%lu: purging message with id %i for node %o; found message.\n"),millis(), messageHeader->id, messageHeader->to_node));
+            purgeBufferedMessage(i);
+        }
+    }
 }
 
 /******************************************************************/
@@ -498,28 +523,76 @@ void RF24Network::purgeMessagesForTimedOutConn(Connection * conn){
 
 
 /******************************************************************/
-//TODO send ACK messages....
 bool RF24Network::enqueue(void)
 {
-  bool result = false;
+    IF_SERIAL_DEBUG(printf_P(PSTR("%lu: NET Enqueue "),millis()));
+    uint8_t * insertAt = NULL;
+    bool foundForSameTarget = false;
+    RF24NetworkHeader * newMessageHeader = reinterpret_cast<RF24NetworkHeader *>(frame_buffer);;
+    RF24NetworkHeader * previousMessage;
+  
+    // if the connection is not valid anymore, do not store the buffered message. (and possibly send a NOT_CONN)
+    Connection * conn = getConnection(newMessageHeader->from_node);
+    if (conn == NULL) {
+        IF_SERIAL_DEBUG(printf_P(PSTR("%lu: Message dropped. Connection closed."),millis()));
+        return false;
+    }
+  
+    //we are expecting a message with id incremented by 1 over the last received. 
+    //For implementation simplicity, all others should be discarded
+    if (smallerOrEqual(newMessageHeader->id, conn->lastMsgRcvdId)) {
+        IF_SERIAL_DEBUG(printf_P(PSTR("%lu; Already received message with id %i from node %o, setting to ack.\n"), millis(),newMessageHeader->id, newMessageHeader->from_node));
+        conn->ackSent = false; //force ACK to be sent for messages we have already received.
+        return true;
+    } else if (conn->lastMsgRcvdId + 1 != newMessageHeader->id) {
+        IF_SERIAL_DEBUG(printf_P(PSTR("%lu; Ignored message from node %o with id %i, we are expecting message with id %i.\n"), millis(), newMessageHeader->from_node, newMessageHeader->id, (uint8_t) (conn->lastMsgRcvdId + 1)));
+        conn->ackSent = false; //force ACK to be sent so that sending node knows what to send.
+        return false;
+    }
+  
+    //we are receiving a new message.. lets process it.
+    if ( next_frame < frame_queue + sizeof(frame_queue) )
+    {
+        IF_SERIAL_DEBUG(printf_P(PSTR("%lu; Received message with id %i from node %o, processing it..\n"), millis(), newMessageHeader->id, conn->nodeAddress));
+        //search for a message with id immediately lower than the one in frame_buffer.
+        //point to the last position in the buffer and decrease until first position is reached
+        for (uint8_t * frame_queue_pointer = next_frame; frame_queue_pointer >= frame_queue; frame_queue_pointer -= FRAME_SIZE) {
+            IF_SERIAL_DEBUG(printf_P(PSTR("%lu; For loop, frame_queue_pointer: %i; next_frame = %i; frame_queue: %i;..\n"), millis(), frame_queue_pointer, next_frame, frame_queue));
+            //reached first array position
+            if (frame_queue_pointer == frame_queue) {
+                IF_SERIAL_DEBUG(printf_P(PSTR("%lu; Inserting at the beginning of the queue..\n"), millis()));
+                //if there wasn't any other message for the same node and the id is immediately higher than the last ACKed message, 
+                //put it in the received messages buffer.
+                insertAt = frame_queue_pointer;
+            } else {
+                previousMessage = reinterpret_cast<RF24NetworkHeader *>(frame_queue_pointer - FRAME_SIZE);
+                if (previousMessage->to_node == newMessageHeader->to_node && previousMessage->id + 1 == newMessageHeader->id) {
+                    insertAt = frame_queue_pointer;
+                    IF_SERIAL_DEBUG(printf_P(PSTR("%lu; Inserting at %i, queue starts at %i..\n"), millis(), insertAt, frame_queue));
+                    break; //DO NOT FORGET this one
+                }
+            }
+        }
 
-  IF_SERIAL_DEBUG(printf_P(PSTR("%lu: NET Enqueue @%x "),millis(),next_frame-frame_queue));
-
-  // Copy the current frame into the frame queue
-  if ( next_frame < frame_queue + sizeof(frame_queue) )
-  {
-    memcpy(next_frame,frame_buffer, FRAME_SIZE );
-    next_frame += FRAME_SIZE;
-
-    result = true;
-    IF_SERIAL_DEBUG(printf_P(PSTR("ok\n")));
-  }
-  else
-  {
-    IF_SERIAL_DEBUG(printf_P(PSTR("failed\n")));
-  }
-
-  return result;
+        if (insertAt != NULL) {
+            conn->lastMsgRcvdId = newMessageHeader->id;
+            conn->ackSent = false;
+            //shift messages to the right so that received messages are in order.
+            if (insertAt < next_frame) {
+                IF_SERIAL_DEBUG(printf_P(PSTR("%lu: Shifting, initialArrayPos: %i [moving %i bytes from %i to %i]\n"),millis(),frame_queue,next_frame - insertAt, insertAt, insertAt + FRAME_SIZE));
+                memmove(insertAt + FRAME_SIZE, insertAt, next_frame - insertAt);
+            }
+            //copy into to the frame queue
+            memcpy(insertAt,frame_buffer, FRAME_SIZE);
+            //increment next_frame;
+            next_frame += FRAME_SIZE;
+            IF_SERIAL_DEBUG(printf_P(PSTR("Stored new incoming message.\n")));
+            return true;
+        }
+    } else {
+        IF_SERIAL_DEBUG(printf_P(PSTR("Message dropped, buffer full!\n")));
+    }
+    return false;
 }
 
 /******************************************************************/
@@ -686,6 +759,7 @@ void RF24Network::resetConnection(Connection * connection, void (* callback)(Con
     IF_SERIAL_DEBUG(printf_P(PSTR("%lu: resetConn; node: %o; conn: %d\n"),millis(),nodeAddress, connected)); 
     connection->nodeAddress = nodeAddress;
     connection->lastMsgRcvdId = 0;
+    connection->lastMessageIdSent = 0;
     connection->ackSent = true;
     connection->connected = connected;
     connection->dirty = false;
@@ -991,6 +1065,17 @@ uint64_t pipe_address( uint16_t node, uint8_t pipe )
   return result;
 }
 
+/******************************************************************/
+
+bool RF24Network::smaller(uint8_t a, uint8_t b) {
+    return (char) a - (char) b < 0;
+}
+
+/******************************************************************/
+
+bool RF24Network::smallerOrEqual(uint8_t a, uint8_t b) {
+    return (char) a - (char) b <= 0;
+}
 
 /********************** debugging helper functions ********************************************/
 #ifdef SERIAL_DEBUG

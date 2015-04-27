@@ -89,14 +89,12 @@ struct Connection {
     // If this node is connected to the nodeAddress declared in this structure.
     bool connected;
 
-    // Id of the last message id sent for what we received an ACK from the remote node.
-    uint8_t lastMessageIdReceivedByRemote;
     // Id of the last message id sent. Should be incremented for each message sent. There is one
     // caveat though: if there is a message in the buffer for which there was a send timeout, this variable should be
-    // set to the value of lastMessageIdReceivedByRemote and all the buffered messages purged.
+    // set to the value of lastMessageIdReceivedByRemote and all the buffered messages with greater id purged.
     uint8_t lastMessageIdSent;
 
-    // Whether an ACK was sent for the last received message.
+    // Whether an ACK was sent for the last received message from the other node.
     bool ackSent;
     // Id of the last received message. This is used for sending ACK messages.
     uint8_t lastMsgRcvdId;
@@ -124,7 +122,7 @@ struct Connection {
 
     Connection() : nodeAddress(0), connected(false), lastMsgRcvdId(0), connectionRetryTimestamp(0),
         ackSent(true), dirty(true), delayBetweenMsg(CONN_MIN_MSG_DELAY), connectionRetries(0), 
-        connCallback(NULL), heartbeatRetries(0), lastMessageIdSent(0), lastMessageIdReceivedByRemote(0) {};
+        connCallback(NULL), heartbeatRetries(0), lastMessageIdSent(0) {};
 };
 
 /**

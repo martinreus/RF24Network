@@ -17,6 +17,7 @@
 
 #define NUMBER_OF_CONNECTIONS 10 // total number of connections a node can handle
 #define BUFFER_SIZE 6 // buffer size for sending reliable messages
+#define RECEIVE_BUFFER_SIZE 5
 
 /**
  * @file RF24Network.h
@@ -39,7 +40,7 @@ struct RF24NetworkHeader
 {
   uint16_t from_node; /**< Logical address where the message was generated */
   uint16_t to_node; /**< Logical address where the message is going */
-  uint16_t id; /**< Sequential message ID. This id is controlled by a connection structure created for each connection to a node. TODO: remove auto-increment*/
+  uint8_t id; /**< Sequential message ID. This id is controlled by a connection structure created for each connection to a node. TODO: remove auto-increment*/
   /**
    * Type of the packet.  0-127 are user-defined types, 128-255 are reserved for system
    *
@@ -352,6 +353,13 @@ private:
   void sendHeartbeatRequests(void);
   
   /**
+   * Purge messages from send buffer that were already received by the other node.
+   * @param conn
+   * @param lastRcvdId
+   */
+  void purgeSentMessagesFromSendBufferUpUntil(Connection * conn, uint8_t lastRcvdId);
+
+  /**
    * Purge a message from the message buffer.
    * @param bufferPos
    */
@@ -367,6 +375,17 @@ private:
    */
   void purgeMessagesForTimedOutConn(Connection * conn);
   
+  
+  /**
+   * returns true if a is smaller or equals to b.
+   */
+  bool smallerOrEqual(uint8_t a, uint8_t b);
+
+  /**
+   * returns true if a is smaller or equals to b.
+   */
+  bool smaller(uint8_t a, uint8_t b);
+
   /**
    * Reset message parameters
    * @param message
@@ -392,7 +411,7 @@ private:
   Connection connections[NUMBER_OF_CONNECTIONS];
   uint16_t node_address; /**< Logical node address of this unit, 1 .. UINT_MAX */
   uint8_t frame_buffer[FRAME_SIZE]; /**< Space to put the frame that will be sent/received over the air */
-  uint8_t frame_queue[5*FRAME_SIZE]; /**< Space for a small set of frames that need to be delivered to the app layer */
+  uint8_t frame_queue[RECEIVE_BUFFER_SIZE*FRAME_SIZE]; /**< Space for a small set of frames that need to be delivered to the app layer */
   uint8_t* next_frame; /**< Pointer into the @p frame_queue where we should place the next received frame */
 
   uint16_t parent_node; /**< Our parent's node address */
