@@ -1,16 +1,20 @@
 # martinreus 2015 - This is a work in progress! Lots of bugs and broken functionality!
 ( Shouldn't be commiting on master, by the way =P )
 
-Currently implementing a simplified way to connect and reliably send packets over the original implementation of this excelent library.
+Currently implementing a simplified way to connect and reliably send packets over the original implementation of this excelent F24Network library from maniacbug.
 
 ## What has been developed so far:
 
-- Establishing a connection between nodes, with heartbeat sending to detect connection loss or failure of one node.
-- Sending bufferized messages. Handlers are used to check whether this message was received or not. Messages are resent if an ACK was not received.
+- Establishing a connection between nodes, with heartbeat message sending to detect connection loss or failure of one node.
+- Sending bufferized messages. Handlers are used to check whether a message was received or not. Messages are automatically resent if an ACK was not received.
+- Receiving and acking messages throughout the network.
 
-## What is being developed / has to be done:
+## What remains to be done:
 
-- Receiving and acking messages through the network.
+- Read available messages from app layer.
+- Test when some of the timers reach maximum threshold, check if the network continues to work.
+- Test when message id returns to 0 after reaching maximum value.
+- Do a full stress test, sending and receiving messages from multiple nodes to ensure everything is working.
 
 Please see the full documentation at http://tmrh20.github.io/RF24Network/
 
