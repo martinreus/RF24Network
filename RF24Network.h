@@ -131,24 +131,31 @@ public:
    * the action happens!
    */
   void update(void);
+  
+  /**
+   * Test whether there is a message available for this node
+   *
+   * @return Whether there is a message available for this node
+   */
+  bool available();
 
   /**
    * Test whether there is a message available for this node
    *
    * @return Whether there is a message available for this node
    */
-  bool available(void);
+  bool available(uint16_t nodeAddress);
 
   /**
-   * Read the next available header
-   *
-   * Reads the next available header without advancing to the next
-   * incoming message.  Useful for doing a switch on the message type
-   *
-   * If there is no message available, the header is not touched
-   *
-   * @param[out] header The header (envelope) of the next message
-   */
+  * Read the next available header
+  *
+  * Reads the next available header without advancing to the next
+  * incoming message. Useful for doing a switch on the message type
+  *
+  * If there is no message available, the header is not touched
+  *
+  * @param[out] header The header (envelope) of the next message
+  */
   void peek(RF24NetworkHeader& header);
 
   /**
@@ -160,6 +167,21 @@ public:
    * @return The total number of bytes copied into @p message
    */
   size_t read(RF24NetworkHeader& header, void* message, size_t maxlen);
+
+  /**
+   * Send a message unreliably. This should now be used only within the context of this library.
+   * Please be aware that calling this method does not guarantee message delivery when it needs to be routed
+   * through other nodes in the network. Use sendReliable instead.
+   *
+   * @note Optimization: Extended timeouts/retries enabled. See txTimeout for more info.
+   * @param[in,out] header The header (envelope) of this message.  The critical
+   * thing to fill in is the @p to_node field so we know where to send the
+   * message.  It is then updated with the details of the actual header sent.
+   * @param message Pointer to memory where the message is located
+   * @param len The size of the message
+   * @return Whether the message was successfully received
+   */
+  bool write(RF24NetworkHeader& header, const void* message, size_t len);
 
   /**
    * Connects to a node, to establish a reliable communication pipe.
@@ -176,21 +198,6 @@ public:
    */
   void connect(uint16_t nodeAddress, void (* callback)(ConnectionStatus *));
     
-  /**
-   * Send a message unreliably. This should now be used only within the context of this library.
-   * Please be aware that calling this method does not guarantee message delivery when it needs to be routed
-   * through other nodes in the network. Use sendReliable instead.
-   *
-   * @note Optimization: Extended timeouts/retries enabled. See txTimeout for more info.
-   * @param[in,out] header The header (envelope) of this message.  The critical
-   * thing to fill in is the @p to_node field so we know where to send the
-   * message.  It is then updated with the details of the actual header sent.
-   * @param message Pointer to memory where the message is located
-   * @param len The size of the message
-   * @return Whether the message was successfully received
-   */
-  bool write(RF24NetworkHeader& header, const void* message, size_t len);
-
   /**
    * Send a message reliably. This method puts a message into a buffer if there is
    * space available, and sends it while in the update loop. This method tries to deliver

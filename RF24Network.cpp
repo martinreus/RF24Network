@@ -127,7 +127,7 @@ void RF24Network::readMessages(void) {
         if ( header.to_node == node_address ){
             // Add it to the buffer of frames for us if it is a user message.
             IF_SERIAL_DEBUG(printf_P(PSTR("%lu: Received packet of type %d\n"),millis(),header.type));
-            if (header.type < 128) {
+            if (header.type < SYSTEM_MESSAGES) {
                 enqueue();
             // if not, treat it as a system message.
             } else {
@@ -482,10 +482,10 @@ void RF24Network:: sendHeartbeatRequests(void) {
             // We did not receive a heartbeat response, so the other node is either dead or connection was closed on the other side.
             // We just close our side of the connection.
             connectionPos->dirty = true;
+            IF_SERIAL_DEBUG(printf_P(PSTR("%lu: sendHeartbeatRequests; conn timed out. Purging messages from buffer..\n"),millis()));
+            purgeMessagesForTimedOutConn(connectionPos);
             //if there is a connection handler, invoke it with connection timed out after purging all messages that are still in the buffer.
             if (connectionPos->connCallback != NULL) {
-                IF_SERIAL_DEBUG(printf_P(PSTR("%lu: sendHeartbeatRequests; conn timedout. Purging messages from buffer..\n"),millis()));
-                purgeMessagesForTimedOutConn(connectionPos);
                 IF_SERIAL_DEBUG(printf_P(PSTR("%lu: sendHeartbeatRequests; invoking connection callback with CONN_TIMEOUT\n"),millis()));
                 ConnectionStatus status(CONN_TIMEOUT, connectionPos->nodeAddress);
                 connectionPos->connCallback(&status);
@@ -613,10 +613,33 @@ bool RF24Network::enqueue(void)
 
 /******************************************************************/
 
-bool RF24Network::available(void)
-{
-  // Are there frames on the queue for us?
-  return (next_frame > frame_queue);
+bool RF24Network::available(uint16_t nodeAddress) {
+    IF_SERIAL_DEBUG(printf_P(PSTR("%lu: available "),millis()));
+    // Are there frames on the queue for us?
+    if (next_frame == frame_queue) {
+        // fail fast if no message exists in buffer.
+        IF_SERIAL_DEBUG(printf_P(PSTR("%lu: No new message in buffer "),millis()));
+        return false;
+    }
+
+    RF24NetworkHeader * messageHeaders;
+    IF_SERIAL_DEBUG(printf_P(PSTR("%lu: Messages exist in buffer. Checking if there is one from (%o). Iterating through buffer..."),millis(), nodeAddress));
+    for (uint8_t * frame_queue_pointer = frame_queue; frame_queue_pointer < next_frame; frame_queue_pointer += FRAME_SIZE) {
+        IF_SERIAL_DEBUG(printf_P(PSTR("%lu: Iteration position: %i; Buffer start: %i; next_frame: %i "),millis(), this->node_address, frame_queue_pointer, next_frame));
+        messageHeaders = reinterpret_cast<RF24NetworkHeader *>(frame_queue_pointer);
+        if (messageHeaders->from_node == nodeAddress) {
+            IF_SERIAL_DEBUG(printf_P(PSTR("%lu: Found message from (%o) "),millis(), messageHeaders->from_node));
+            return true;
+        }
+    }
+    IF_SERIAL_DEBUG(printf_P(PSTR("%lu: No message found from (%o) "),millis(), messageHeaders->from_node));
+    return false;
+}
+
+/******************************************************************/
+
+bool RF24Network::available() {
+    return (next_frame > frame_queue);
 }
 
 /******************************************************************/
@@ -633,40 +656,41 @@ uint16_t RF24Network::parent() const
 
 void RF24Network::peek(RF24NetworkHeader& header)
 {
-  if ( available() )
-  {
-    // Copy the next available frame from the queue into the provided buffer
-    memcpy(&header,next_frame-FRAME_SIZE,sizeof(RF24NetworkHeader));
-  }
+    if ( available() )
+    {
+        // Copy the next available frame from the queue into the provided buffer
+        memcpy(&header,next_frame-FRAME_SIZE,sizeof(RF24NetworkHeader));
+    }
 }
 
 /******************************************************************/
 
-size_t RF24Network::read(RF24NetworkHeader& header,void* message, size_t maxlen)
-{
-  size_t bufsize = 0;
+size_t RF24Network::read(RF24NetworkHeader& header,void* message, size_t maxlen) {
+    size_t bufsize = 0;
 
-  if ( available() )
-  {
-    // Move the pointer back one in the queue
-    next_frame -= FRAME_SIZE;
-    uint8_t* frame = next_frame;
+    if ( available() ) {
+        // Move the pointer back one in the queue
+        next_frame -= FRAME_SIZE;
+        //read the first message, since we should read messages in order.
+        uint8_t* frame = frame_queue;
 
-    memcpy(&header,frame,sizeof(RF24NetworkHeader));
+        memcpy(&header,frame,sizeof(RF24NetworkHeader));
 
-    if (maxlen > 0)
-    {
-      // How much buffer size should we actually copy?
-      bufsize = min(maxlen,FRAME_SIZE-sizeof(RF24NetworkHeader));
+        if (maxlen > 0) {
+            // How much buffer size should we actually copy?
+            bufsize = min(maxlen,FRAME_SIZE-sizeof(RF24NetworkHeader));
 
-      // Copy the next available frame from the queue into the provided buffer
-      memcpy(message,frame+sizeof(RF24NetworkHeader),bufsize);
+            // Copy the next available frame from the queue into the provided buffer
+            memcpy(message,frame+sizeof(RF24NetworkHeader),bufsize);
+        }
+
+        // Move all queue one message back
+        memmove(frame_queue, frame_queue + FRAME_SIZE, next_frame - frame_queue);
+        IF_SERIAL_DEBUG(printf_P(PSTR("%lu: NET Received %s\n"),millis(),header.toString())); 
+
     }
 
-    IF_SERIAL_DEBUG(printf_P(PSTR("%lu: NET Received %s\n"),millis(),header.toString()));
-  }
-
-  return bufsize;
+    return bufsize;
 }
 
 /******************************************************************/

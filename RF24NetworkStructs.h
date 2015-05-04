@@ -29,21 +29,21 @@
 #define MSG_STATUS_DISCONNECTED -1
 #define MSG_STATUS_OK 1
 
-//class RF24;
-// Reserved message types sent between nodes. Message types ranging from 0-127 are user defined messages.
-#define MSG_ACK 130
-#define MSG_SYN 131
-#define MSG_SYN_ACK 132
-#define MSG_BUFFER_FULL 133
-#define MSG_CONN_REFUSED 134
-#define MSG_HEARTBEAT_REQ 135
-#define MSG_HEARTBEAT_ACK 136
-#define MSG_NOT_CONNECTED 137
+
+#define SYSTEM_MESSAGES 231
+// Reserved message types sent between nodes. Message types ranging from 0-230 are user defined messages.
+#define MSG_ACK 231
+#define MSG_SYN 232
+#define MSG_SYN_ACK 233
+#define MSG_BUFFER_FULL 234
+#define MSG_CONN_REFUSED 235
+#define MSG_HEARTBEAT_REQ 236
+#define MSG_HEARTBEAT_ACK 237
+#define MSG_NOT_CONNECTED 238
 
 
 // Constants for message sending
 #define MSG_SENDING_MAX_RETRIES 10
-
 #define FRAME_SIZE 32 /**< How large is each frame over the air */
 
 #include "RF24Network.h"
