@@ -364,13 +364,13 @@ private:
    * @param conn
    * @param lastRcvdId
    */
-  void purgeSentMessagesFromSendBufferUpUntil(Connection * conn, uint8_t lastRcvdId);
+  void purgeSentMessagesFromSendBufferAndFireMessageCallBack(Connection * conn, uint8_t lastRcvdId);
 
   /**
    * Purge a message from the message buffer.
    * @param bufferPos
    */
-  void purgeBufferedMessage(int bufferPos);
+  void purgeBufferedMessage(uint8_t bufferPos);
   
   /**
    * Gets the next available message buffer position for a given connection represented by targetNodeAddress.

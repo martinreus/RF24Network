@@ -59,9 +59,10 @@ struct RF24NetworkHeader;
 struct MessageStatus {
 
     int8_t statusCode;
-    RF24NetworkHeader * header; 
+    uint16_t destNode;
+    uint8_t messageId;
 
-    MessageStatus(int8_t status, RF24NetworkHeader * messageHeader): statusCode(status), header(messageHeader) {};
+    MessageStatus(int8_t status, uint16_t to_node, uint8_t msgId): statusCode(status), destNode(to_node), messageId(msgId) {};
 
 };
 

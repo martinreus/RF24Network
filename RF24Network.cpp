@@ -50,7 +50,7 @@ void RF24Network::begin(uint8_t _channel, uint16_t _node_address )
   // Use different retry periods to reduce data collisions
 
   uint8_t retryVar = (node_address % 7) + 5;
-  radio.setRetries(retryVar, 5); // decreased from 15 to 5
+  radio.setRetries(retryVar, 5); // decreased from 15 to 2
   txTimeout = retryVar * 17;
 
 #if defined (DUAL_HEAD_RADIO)
@@ -86,12 +86,12 @@ void RF24Network::update(void) {
 
 void RF24Network::sendAcks(){
     IF_SERIAL_DEBUG(printf_P(PSTR("%lu: sendAcks\n"),millis()));
-    for (Connection * connection = connections; connection <= &connections[NUMBER_OF_CONNECTIONS]; connection++) {
+    for (Connection * connection = connections; connection < &connections[NUMBER_OF_CONNECTIONS]; connection++) {
         IF_SERIAL_DEBUG(printf_P(PSTR("%lu: connection iter: %i; Conn start: %i;\n"),millis(), connection, connections));
         if (connection->connected && !connection->ackSent) {
             IF_SERIAL_DEBUG(printf_P(PSTR("%lu: Connection found with acks to send. ConnNumber: %i; ackId: %i;\n"),millis(),connection->nodeAddress, connection->lastMsgRcvdId));
             RF24NetworkHeader header(connection->nodeAddress, MSG_ACK);
-            write(header, NULL, 0);
+            write(header, &(connection->lastMsgRcvdId), sizeof(connection->lastMsgRcvdId));
             IF_SERIAL_DEBUG(printf_P(PSTR("%lu: Ack sent!\n"),millis()));
             connection->ackSent = true;
         }
@@ -132,6 +132,12 @@ void RF24Network::readMessages(void) {
             // if not, treat it as a system message.
             } else {
                 treatSystemMessages();
+            }
+            // If there is a connection for the sender of this message, 
+            // decrease the connection delay for every message received.
+            Connection * conn = getConnection(header.from_node);
+            if (conn != NULL) {
+                decreaseConnectionDelay(conn);
             }
         }else{
             // Relay it
@@ -175,7 +181,7 @@ void RF24Network::sendBufferizedMessages(void) {
         if (connection == NULL) {
             if (message->messageCallback != NULL) {
                 IF_SERIAL_DEBUG(printf_P(PSTR("%lu: No Conn, invoking handler\n"),millis()));
-                MessageStatus status(MSG_STATUS_DISCONNECTED, header);
+                MessageStatus status(MSG_STATUS_DISCONNECTED, header->to_node, header->id);
                 message->messageCallback(&status);
             }
             continue;
@@ -212,7 +218,7 @@ void RF24Network::sendBufferizedMessages(void) {
             //let who tried to send this message know that it was not delivered.
             if (message->messageCallback != NULL) {
                 IF_SERIAL_DEBUG(printf_P(PSTR("%lu: invoking handler\n"),millis()));
-                MessageStatus status(MSG_STATUS_TIMEOUT, header);
+                MessageStatus status(MSG_STATUS_TIMEOUT, header->to_node, header->id);
                 message->messageCallback(&status);
             }
         }
@@ -295,9 +301,9 @@ Message * RF24Network::getNextFreeMessageBufferPosition(uint16_t targetNodeAddre
 
 /******************************************************************/
 
-void RF24Network::purgeBufferedMessage(int bufferPos) {
+void RF24Network::purgeBufferedMessage(uint8_t bufferPos) {
     // only purge valid buffer positions
-    IF_SERIAL_DEBUG(printf_P(PSTR("%lu: purgeBufPos %d; \n"),millis(), bufferPos));
+    IF_SERIAL_DEBUG(printf_P(PSTR("%lu: purgeBufPos %i; \n"),millis(), bufferPos));
     if (bufferPos >= messageBufferUsedPositions || bufferPos < 0 || messageBufferUsedPositions == 0)
         return;
 
@@ -451,7 +457,7 @@ void RF24Network::treatSystemMessages() {
                 //assuming we have a correct id in the payload,
                 const uint8_t ackedId = * reinterpret_cast<uint8_t*>(frame_buffer + sizeof(RF24NetworkHeader));
                 IF_SERIAL_DEBUG(printf_P(PSTR("%lu: Node %o received our messages until id %i.\n"),millis(),header.from_node,ackedId));
-                purgeSentMessagesFromSendBufferUpUntil(connection, ackedId);
+                purgeSentMessagesFromSendBufferAndFireMessageCallBack(connection, ackedId);
             }
             break;
     }
@@ -497,12 +503,21 @@ void RF24Network:: sendHeartbeatRequests(void) {
 }
 
 /******************************************************************/
-void RF24Network::purgeSentMessagesFromSendBufferUpUntil(Connection * connection, uint8_t ackedId){
+void RF24Network::purgeSentMessagesFromSendBufferAndFireMessageCallBack(Connection * connection, uint8_t ackedId){
     RF24NetworkHeader * messageHeader;
-    for (uint8_t i = messageBufferUsedPositions - 1; i >= 0; i-- ) {
+    bool higherIdMessage = true;
+    for (int8_t i = messageBufferUsedPositions - 1; i >= 0; i-- ) {
         messageHeader = reinterpret_cast<RF24NetworkHeader *>(sendMessageBuffer[i].payload);
         
         if (messageHeader->to_node == connection->nodeAddress && smallerOrEqual(messageHeader->id, ackedId)) {
+            // fire callback only for the message with higher id.
+            if (higherIdMessage) {
+                higherIdMessage = false;
+                if (sendMessageBuffer[i].messageCallback != NULL) {
+                    MessageStatus status(MSG_STATUS_OK, messageHeader->to_node, messageHeader->id);
+                    sendMessageBuffer[i].messageCallback(&status);
+                }
+            }
             IF_SERIAL_DEBUG(printf_P(PSTR("%lu: purging message with id %i for node %o; found message.\n"),millis(), messageHeader->id, messageHeader->to_node));
             purgeBufferedMessage(i);
         }
@@ -735,7 +750,7 @@ void RF24Network::sendReliable(RF24NetworkHeader * header, const void * message,
     if (connection == NULL) {
         IF_SERIAL_DEBUG(printf_P(PSTR("%lu: connection is null;\n"),millis()));
         if (callback != NULL) {
-            MessageStatus status(MSG_NOT_CONNECTED, header);
+            MessageStatus status(MSG_NOT_CONNECTED, header->to_node, header->id);
             callback(&status);
         }
         return;
@@ -751,7 +766,7 @@ void RF24Network::sendReliable(RF24NetworkHeader * header, const void * message,
         Message * bufferPosition = getNextFreeMessageBufferPosition(header->to_node);
         if (bufferPosition == NULL) {
             if (callback != NULL) {
-                MessageStatus status(MSG_BUFFER_FULL, header);
+                MessageStatus status(MSG_BUFFER_FULL, header->to_node, header->id);
                 callback(&status);
             }
             return;
