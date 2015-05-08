@@ -8,13 +8,14 @@ Currently implementing a simplified way to connect and reliably send packets ove
 - Establishing a connection between nodes, with heartbeat message sending to detect connection loss or failure of one node.
 - Sending bufferized messages. Handlers are used to check whether a message was received or not. Messages are automatically resent if an ACK was not received.
 - Receiving and acking messages throughout the network.
+- Read available messages from app layer.
+- Test when message id returns to 0 after reaching maximum value.
 
 ## What remains to be done:
 
-- Read available messages from app layer.
 - Test when some of the timers reach maximum threshold, check if the network continues to work.
-- Test when message id returns to 0 after reaching maximum value.
 - Do a full stress test, sending and receiving messages from multiple nodes to ensure everything is working.
+- Optimize library. Some of the operations that rely on iteration through the connection and message buffer array can be heavily optimized, increasing total throughput.
 
 Please see the full documentation at http://tmrh20.github.io/RF24Network/
 
