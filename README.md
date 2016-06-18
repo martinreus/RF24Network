@@ -1,7 +1,7 @@
-# martinreus 2015 - This is a work in progress! Lots of bugs and broken functionality!
-( Shouldn't be commiting on master, by the way =P )
+# martinreus 2015 - This is a work in progress!
 
-Currently implementing a simplified way to connect and reliably send packets over the original implementation of this excelent F24Network library from maniacbug.
+Currently implementing a simplified way to connect and RELIABLY send packets (in a TCP-ish manner) over the original implementation of the excelent F24Network library. This library is optimized for usage with arduino, since its footprint is pretty low but still provides mesh networking capabilities between several nodes.
+This library depends on the RF24 library (https://github.com/TMRh20/RF24.git), commit hash a46779fad0f52ffffd1e43a4fd1e3214aed17011
 
 ## What has been developed so far:
 
@@ -13,6 +13,7 @@ Currently implementing a simplified way to connect and reliably send packets ove
 
 ## What remains to be done:
 
+Main tasks involve testing of this library.
 - Test when some of the timers reach maximum threshold, check if the network continues to work.
 - Do a full stress test, sending and receiving messages from multiple nodes to ensure everything is working.
 - Optimize library. Some of the operations that rely on iteration through the connection and message buffer array can be heavily optimized, increasing total throughput.
