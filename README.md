@@ -1,4 +1,4 @@
-# martinreus 2015 - This is a work in progress!
+# WIP!
 
 Currently implementing a simplified way to connect and RELIABLY send packets (in a TCP-ish manner) over the original implementation of the excelent F24Network library. This library is optimized for usage with arduino, since its footprint is pretty low but still provides mesh networking capabilities between several nodes.
 This library depends on the RF24 library (https://github.com/TMRh20/RF24.git), commit hash a46779fad0f52ffffd1e43a4fd1e3214aed17011
